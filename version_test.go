@@ -3,20 +3,14 @@
 
 package kerbexchange
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestSpecVersionIsSetAndPrivacyClean(t *testing.T) {
-	if SpecVersion == "" {
-		t.Fatal("SpecVersion must not be empty")
-	}
-	// SpecVersion ships in tracked source — it must never carry an internal
-	// tracker reference (CLAUDE.md privacy rule 3).
-	for _, banned := range []string{"OSS-", "stern", "plane", "mailbox"} {
-		if strings.Contains(strings.ToLower(SpecVersion), strings.ToLower(banned)) {
-			t.Errorf("SpecVersion %q contains banned internal reference %q", SpecVersion, banned)
-		}
+func TestSpecVersion(t *testing.T) {
+	// Pin the exact value. SpecVersion ships in public source, so this guards
+	// both that it is set and that no stray internal reference creeps in: any
+	// change must be deliberate and update this expectation.
+	const want = "v0 (OAuth2-to-Kerberos exchange; RFC 8693 profile)"
+	if SpecVersion != want {
+		t.Errorf("SpecVersion = %q, want %q", SpecVersion, want)
 	}
 }
