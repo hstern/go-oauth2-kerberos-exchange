@@ -4,6 +4,7 @@
 package kerbexchange
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -86,6 +87,14 @@ func (m *DirectMinter) Mint(spn ServicePrincipal, opts MintOptions) (MintedTicke
 	srealm := spn.Realm
 	if srealm == "" {
 		srealm = m.defaultRealm
+	}
+
+	// Validate EndTime: must be set and must be after AuthTime.
+	if opts.EndTime.IsZero() {
+		return MintedTicket{}, errors.New("kerbexchange: mint requires a non-zero EndTime")
+	}
+	if !opts.EndTime.After(opts.AuthTime) {
+		return MintedTicket{}, errors.New("kerbexchange: EndTime must be after AuthTime")
 	}
 
 	// Fetch the long-term service key.

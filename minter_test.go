@@ -15,6 +15,47 @@ import (
 	"github.com/go-krb5/krb5/types"
 )
 
+func TestDirectMinterMintRejectsBadEndTime(t *testing.T) {
+	ks := NewKeytabSource(testKeytab(t), "EXAMPLE.COM")
+	m := NewDirectMinter(ks, "EXAMPLE.COM")
+	spn := ServicePrincipal{Service: "imap", Host: "mail.example.com", Realm: "EXAMPLE.COM"}
+	clientName := types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"alice"}}
+	authTime := time.Unix(1000, 0)
+
+	// Zero EndTime must be rejected.
+	_, err := m.Mint(spn, MintOptions{
+		ClientName:  clientName,
+		ClientRealm: "EXAMPLE.COM",
+		AuthTime:    authTime,
+		// EndTime intentionally omitted (zero value).
+	})
+	if err == nil {
+		t.Error("expected error for zero EndTime, got nil")
+	}
+
+	// EndTime equal to AuthTime must be rejected (not strictly after).
+	_, err = m.Mint(spn, MintOptions{
+		ClientName:  clientName,
+		ClientRealm: "EXAMPLE.COM",
+		AuthTime:    authTime,
+		EndTime:     authTime,
+	})
+	if err == nil {
+		t.Error("expected error for EndTime == AuthTime, got nil")
+	}
+
+	// EndTime before AuthTime must be rejected.
+	_, err = m.Mint(spn, MintOptions{
+		ClientName:  clientName,
+		ClientRealm: "EXAMPLE.COM",
+		AuthTime:    authTime,
+		EndTime:     authTime.Add(-time.Second),
+	})
+	if err == nil {
+		t.Error("expected error for EndTime before AuthTime, got nil")
+	}
+}
+
 func TestDirectMinterMintRoundTrip(t *testing.T) {
 	ks := NewKeytabSource(testKeytab(t), "EXAMPLE.COM")
 	m := NewDirectMinter(ks, "EXAMPLE.COM")
