@@ -4,6 +4,8 @@ github.com/go-crypt/x v0.4.16 h1:WXdY28H/0MsXnH+gwerxuCcvBTJPkBG90u6oS4gIPZI=
 github.com/go-crypt/x v0.4.16/go.mod h1:vmVFA/d/oLrEaCbqsLcjBMlTqF8u8pvH/c4+EJ/ped8=
 github.com/go-krb5/x v0.3.2 h1:uIjmgkxEbIXoVwgKT1Xi+efVmtqiXcpQlCVuJ/hq2Z0=
 github.com/go-krb5/x v0.3.2/go.mod h1:h44nn9OxeR34A9Tu0UZfRmgwWizETfWwWy97K3RlxuI=
+github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
+github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/hstern/go-token-exchange v0.1.1 h1:9Xrt4nts0DGGM7xpw8hlaomIFFbnJdgZOTAGI3kefsk=
 github.com/hstern/go-token-exchange v0.1.1/go.mod h1:LunRGsoUYqkUAp4phB1yTZzxY/JJCHIxxAgPSxpNeEs=
 github.com/hstern/krb5 v0.1.1-0.20260622104107-87caa9334a75 h1:3/c0vtjWTE4sWWujPa0zVBTFEpuNgQljunfhfOspDIg=
@@ -14,5 +16,7 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 golang.org/x/crypto v0.53.0 h1:QZ4Muo8THX6CizN2vPPd5fBGHyogrdK9fG4wLPFUsto=
 golang.org/x/crypto v0.53.0/go.mod h1:DNLU434OwVakk9PzuwV8w62mAJpRJL3vsgcfp4Qnsio=
+golang.org/x/net v0.56.0 h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o=
+golang.org/x/net v0.56.0/go.mod h1:D3Ku6r+V6JROoZK144D2XfMHFcMq/0zSfLelVTCFKec=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
