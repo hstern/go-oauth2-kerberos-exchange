@@ -46,6 +46,15 @@ type MintedTicket struct {
 	Ticket messages.Ticket
 	// SessionKey is the session key embedded in EncTicketPart.Key.
 	SessionKey types.EncryptionKey
+	// ClientName is the Kerberos principal name of the subject.
+	ClientName types.PrincipalName
+	// ClientRealm is the realm of the subject.
+	ClientRealm string
+	// Target is the service principal for which the ticket was issued, with
+	// the resolved realm populated.
+	Target ServicePrincipal
+	// AuthTime mirrors EncTicketPart.AuthTime.
+	AuthTime time.Time
 	// EndTime mirrors EncTicketPart.EndTime for convenient expiry checks.
 	EndTime time.Time
 }
@@ -159,8 +168,12 @@ func (m *DirectMinter) Mint(spn ServicePrincipal, opts MintOptions) (MintedTicke
 	}
 
 	return MintedTicket{
-		Ticket:     tkt,
-		SessionKey: sessionKey,
-		EndTime:    opts.EndTime,
+		Ticket:      tkt,
+		SessionKey:  sessionKey,
+		ClientName:  opts.ClientName,
+		ClientRealm: crealm,
+		Target:      ServicePrincipal{Service: spn.Service, Host: spn.Host, Realm: srealm},
+		AuthTime:    opts.AuthTime,
+		EndTime:     opts.EndTime,
 	}, nil
 }
