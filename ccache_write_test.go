@@ -48,4 +48,8 @@ func TestMarshalCCacheRoundTrip(t *testing.T) {
 	if !bytes.Equal(cred.Ticket, tktBytes) {
 		t.Errorf("ticket bytes did not round-trip")
 	}
+	// RenewTill must round-trip as epoch 0 (not a garbage negative value).
+	if cred.RenewTill.Unix() != 0 {
+		t.Errorf("RenewTill.Unix() = %d, want 0", cred.RenewTill.Unix())
+	}
 }

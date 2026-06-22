@@ -4,6 +4,8 @@
 package kerbexchange
 
 import (
+	"time"
+
 	"github.com/go-krb5/krb5/credentials"
 	"github.com/go-krb5/krb5/iana/nametype"
 	"github.com/go-krb5/krb5/types"
@@ -20,7 +22,7 @@ func MarshalCCache(mt MintedTicket) ([]byte, error) {
 	client := credentials.NewPrincipal(mt.ClientName, mt.ClientRealm)
 	server := credentials.NewPrincipal(
 		types.PrincipalName{
-			NameType:   nametype.KRB_NT_PRINCIPAL,
+			NameType:   nametype.KRB_NT_SRV_HST,
 			NameString: []string{mt.Target.Service, mt.Target.Host},
 		},
 		mt.Target.Realm,
@@ -33,6 +35,7 @@ func MarshalCCache(mt MintedTicket) ([]byte, error) {
 		AuthTime:    mt.AuthTime,
 		StartTime:   mt.AuthTime,
 		EndTime:     mt.EndTime,
+		RenewTill:   time.Unix(0, 0),
 		TicketFlags: types.NewKrbFlags(),
 		Ticket:      tkt,
 	}
