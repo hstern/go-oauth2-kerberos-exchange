@@ -34,26 +34,46 @@ func (m DefaultClaimsMapper) Map(id Identity) (string, []string, []string, error
 			return "", nil, nil, fmt.Errorf("kerbexchange: parse claims: %w", err)
 		}
 	}
-	return id.Subject, stringOrList(fields[groupsClaim]), stringOrList(fields["scope"]), nil
+	groups, err := stringOrList(fields[groupsClaim])
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("kerbexchange: parse claim: %w", err)
+	}
+	scopes, err := stringOrList(fields["scope"])
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("kerbexchange: parse claim: %w", err)
+	}
+	return id.Subject, groups, scopes, nil
 }
 
 // stringOrList parses a claim value that may be a JSON array of strings or a
-// single space/comma-delimited string into a slice. Returns nil when absent.
-func stringOrList(raw json.RawMessage) []string {
+// single space/comma-delimited string into a slice. Returns nil, nil when
+// absent. Returns a non-nil error when the value is present but is neither a
+// string nor an array of strings.
+func stringOrList(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var list []string
 	if err := json.Unmarshal(raw, &list); err == nil {
-		return list
+		// Filter empty and whitespace-only entries to match string-path behaviour.
+		var out []string
+		for _, s := range list {
+			if strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		if len(out) == 0 {
+			return nil, nil
+		}
+		return out, nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		f := strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == ',' })
 		if len(f) == 0 {
-			return nil
+			return nil, nil
 		}
-		return f
+		return f, nil
 	}
-	return nil
+	return nil, fmt.Errorf("kerbexchange: claim value is not a string or list of strings")
 }
