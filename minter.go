@@ -18,6 +18,7 @@ import (
 	"github.com/go-krb5/krb5/iana/keyusage"
 	"github.com/go-krb5/krb5/iana/nametype"
 	"github.com/go-krb5/krb5/messages"
+	"github.com/go-krb5/krb5/pac"
 	"github.com/go-krb5/krb5/types"
 )
 
@@ -28,6 +29,10 @@ type MintOptions struct {
 	ClientName types.PrincipalName
 	// ClientRealm is the realm of the subject.
 	ClientRealm string
+	// Identity is the authenticated identity for which the ticket is minted.
+	// Required when a PACBuilder is configured on the DirectMinter; ignored
+	// otherwise.
+	Identity Identity
 	// AuthTime is the time at which the client was authenticated (maps to
 	// EncTicketPart.AuthTime).
 	AuthTime time.Time
@@ -69,16 +74,25 @@ type Minter interface {
 // marshalling it with the go-krb5 ASN.1 codec, and encrypting it under the
 // long-term service key fetched from a KeySource.
 //
-// It prefers AES-256-CTS-HMAC-SHA1-96. Phase 4 will layer PAC construction
-// on top; the AuthorizationData field is intentionally left empty here.
+// It prefers AES-256-CTS-HMAC-SHA1-96. When a PACBuilder is configured via
+// WithPACBuilder, a signed MS-PAC is embedded in the ticket's AuthorizationData.
 type DirectMinter struct {
 	keys         KeySource
 	defaultRealm string
+	pacBuilder   PACBuilder
 }
 
 // NewDirectMinter returns a DirectMinter backed by the given KeySource.
 func NewDirectMinter(keys KeySource, defaultRealm string) *DirectMinter {
 	return &DirectMinter{keys: keys, defaultRealm: defaultRealm}
+}
+
+// WithPACBuilder configures a PACBuilder whose output is embedded as a signed
+// MS-PAC in the AuthorizationData of every ticket Mint produces. Returns the
+// receiver to allow method chaining.
+func (m *DirectMinter) WithPACBuilder(b PACBuilder) *DirectMinter {
+	m.pacBuilder = b
+	return m
 }
 
 // Mint builds and encrypts a service ticket for spn according to opts.
@@ -141,7 +155,28 @@ func (m *DirectMinter) Mint(spn ServicePrincipal, opts MintOptions) (MintedTicke
 		StartTime: startTime,
 		EndTime:   opts.EndTime,
 		RenewTill: opts.RenewTill,
-		// AuthorizationData intentionally empty — PAC slot for Phase 4.
+	}
+
+	// If a PACBuilder is configured, build and sign the PAC, then embed it in
+	// AuthorizationData as AD-IF-RELEVANT{ AD-WIN2K-PAC }.
+	if m.pacBuilder != nil {
+		kvi, ci, err := m.pacBuilder.Build(opts.Identity, opts.AuthTime)
+		if err != nil {
+			return MintedTicket{}, fmt.Errorf("kerbexchange: build PAC: %w", err)
+		}
+		kdcKey, _, err := m.keys.KDCSigningKey(etypeID.AES256_CTS_HMAC_SHA1_96)
+		if err != nil {
+			return MintedTicket{}, err
+		}
+		pacBytes, err := pac.NewPAC().WithKerbValidationInfo(kvi).WithClientInfo(ci).SignAndMarshal(skey, kdcKey)
+		if err != nil {
+			return MintedTicket{}, fmt.Errorf("kerbexchange: sign PAC: %w", err)
+		}
+		authData, err := pacAuthorizationData(pacBytes)
+		if err != nil {
+			return MintedTicket{}, err
+		}
+		etp.AuthorizationData = authData
 	}
 
 	// Marshal EncTicketPart using the go-krb5 ASN.1 codec (NOT stdlib
