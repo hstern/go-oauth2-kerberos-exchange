@@ -32,10 +32,10 @@ type PACBuilder interface {
 
 // SyntheticPACBuilder builds a minimal, self-contained PAC from the identity's
 // Subject claim alone.  No directory lookup is performed.  Group membership is
-// limited to the primary group; ExtraSIDs and ResourceGroup fields are left
-// empty.  This is suitable for environments where the downstream Kerberos
-// service only needs a verifiable identity principal, not full AD group
-// expansion.
+// derived from identity claims and optionally downscoped by a ScopeFilter;
+// ExtraSIDs and ResourceGroup fields are left empty.  This is suitable for
+// environments where the downstream Kerberos service only needs a verifiable
+// identity principal with claim-derived group membership.
 type SyntheticPACBuilder struct {
 	// DomainSID is the authority SID of the synthetic Kerberos domain
 	// (e.g. S-1-5-21-a-b-c).
@@ -45,6 +45,24 @@ type SyntheticPACBuilder struct {
 	// every synthesized identity.  Domain Users (513) is the conventional
 	// default.
 	DefaultPrimaryGroupRID uint32
+
+	// GroupsClaim is the JWT claim name that lists group membership
+	// (default "groups").  Forwarded to DefaultClaimsMapper when Mapper is nil.
+	GroupsClaim string
+
+	// GroupOverrides maps a group name to an explicit RID, bypassing the
+	// deterministic FNV-32a synthesis.  Useful when the PAC consumer has a
+	// fixed SID/RID expectation for a well-known group.
+	GroupOverrides map[string]uint32
+
+	// ScopeFilter, when non-nil, restricts which claim groups land in the PAC
+	// to those admitted by the token's granted scopes.  When nil, all claim
+	// groups are included.
+	ScopeFilter ScopeFilter
+
+	// Mapper overrides the claim extraction logic.  When nil, DefaultClaimsMapper
+	// with GroupsClaim is used.
+	Mapper ClaimsMapper
 }
 
 // NewSyntheticPACBuilder parses domainSID (format "S-1-5-21-a-b-c") and
@@ -62,8 +80,41 @@ func NewSyntheticPACBuilder(domainSID string) (*SyntheticPACBuilder, error) {
 
 // Build constructs a minimal KerbValidationInfo and ClientInfo for id.
 // authTime is stored in the ClientInfo ClientID field per the MS-PAC spec.
+// Group membership is derived from identity claims; a ScopeFilter, if set,
+// restricts groups to those admitted by the token's granted scopes.
 func (b *SyntheticPACBuilder) Build(id Identity, authTime time.Time) (*pac.KerbValidationInfo, *pac.ClientInfo, error) {
-	uid := ridFromSubject(id.Subject)
+	mapper := b.Mapper
+	if mapper == nil {
+		mapper = DefaultClaimsMapper{GroupsClaim: b.GroupsClaim}
+	}
+	subject, groupNames, grantedScopes, err := mapper.Map(id)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	admitted := groupNames
+	if b.ScopeFilter != nil {
+		admitted = b.ScopeFilter.Admit(grantedScopes, groupNames)
+	}
+
+	groupIDs := []mstypes.GroupMembership{
+		{
+			RelativeID: b.DefaultPrimaryGroupRID,
+			// SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED
+			Attributes: 0x7,
+		},
+	}
+	seen := map[uint32]struct{}{b.DefaultPrimaryGroupRID: {}}
+	for _, g := range admitted {
+		rid := b.groupRID(g)
+		if _, dup := seen[rid]; dup {
+			continue
+		}
+		seen[rid] = struct{}{}
+		groupIDs = append(groupIDs, mstypes.GroupMembership{RelativeID: rid, Attributes: 0x7})
+	}
+
+	uid := ridFromSubject(subject)
 
 	kvi := &pac.KerbValidationInfo{
 		// LogOnTime: the caller-supplied authentication instant, matching the
@@ -80,20 +131,15 @@ func (b *SyntheticPACBuilder) Build(id Identity, authTime time.Time) (*pac.KerbV
 		PasswordCanChange:  mstypes.FileTime{},
 		PasswordMustChange: neverFileTime,
 
-		EffectiveName: rpcUnicode(id.Subject),
+		EffectiveName: rpcUnicode(subject),
 
 		UserID:         uid,
 		PrimaryGroupID: b.DefaultPrimaryGroupRID,
 
-		// GroupCount / GroupIDs: at minimum the primary group.
-		GroupCount: 1,
-		GroupIDs: []mstypes.GroupMembership{
-			{
-				RelativeID: b.DefaultPrimaryGroupRID,
-				// SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED
-				Attributes: 0x7,
-			},
-		},
+		// GroupCount / GroupIDs: primary group plus any claim-derived groups
+		// admitted by the ScopeFilter (or all claim groups when no filter is set).
+		GroupCount: uint32(len(groupIDs)),
+		GroupIDs:   groupIDs,
 
 		// UserFlags: NETLOGON_EXTRA_SIDS bit (26) is NOT set because ExtraSIDs
 		// is empty.  Leave zero.
@@ -123,8 +169,8 @@ func (b *SyntheticPACBuilder) Build(id Identity, authTime time.Time) (*pac.KerbV
 
 	ci := &pac.ClientInfo{
 		ClientID:   mstypes.GetFileTime(authTime.UTC()),
-		NameLength: uint16(len(utf16.Encode([]rune(id.Subject))) * 2),
-		Name:       id.Subject,
+		NameLength: uint16(len(utf16.Encode([]rune(subject))) * 2),
+		Name:       subject,
 	}
 
 	return kvi, ci, nil
@@ -180,13 +226,26 @@ func parseDomainSID(s string) (mstypes.RPCSID, error) {
 	}, nil
 }
 
-// ridFromSubject derives a deterministic, non-zero RID from a subject string
-// using FNV-32a.  The result is OR'd with 0x40000000 to avoid collision with
-// well-known Windows RIDs (which live below 0x400).
-func ridFromSubject(s string) uint32 {
+// ridFromName derives a stable RID from an arbitrary name. Deterministic across
+// processes (SSSD caches SID->id); FNV-32a, OR'd clear of well-known RIDs.
+func ridFromName(name string) uint32 {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(s))
+	_, _ = h.Write([]byte(name))
 	return h.Sum32() | 0x40000000
+}
+
+// ridFromSubject derives a deterministic, non-zero RID from a subject string.
+// It delegates to ridFromName so both subjects and group names share the same
+// stable synthesis algorithm.
+func ridFromSubject(s string) uint32 { return ridFromName(s) }
+
+// groupRID maps a group name to a RID: an explicit override if present, else the
+// deterministic synthesis.
+func (b *SyntheticPACBuilder) groupRID(name string) uint32 {
+	if rid, ok := b.GroupOverrides[name]; ok {
+		return rid
+	}
+	return ridFromName(name)
 }
 
 // rpcUnicode constructs an RPCUnicodeString from a plain Go string.

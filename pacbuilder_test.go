@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"log"
+	"reflect"
 	"testing"
 	"time"
 
@@ -78,5 +79,82 @@ func TestBuildLogOnTimeMatchesAuthTime(t *testing.T) {
 	want := mstypes.GetFileTime(authTime.UTC())
 	if kvi.LogOnTime != want {
 		t.Errorf("LogOnTime = %+v, want %+v", kvi.LogOnTime, want)
+	}
+}
+
+func TestBuildGroupsFromClaimsNoFilter(t *testing.T) {
+	pb, _ := NewSyntheticPACBuilder("S-1-5-21-1-2-3")
+	id := Identity{Subject: "alice", Claims: json.RawMessage(`{"groups":["g1","g2"]}`)}
+	kvi, _, err := pb.Build(id, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kvi.GroupCount != 3 || len(kvi.GroupIDs) != 3 {
+		t.Fatalf("GroupCount = %d, want 3", kvi.GroupCount)
+	}
+	if kvi.GroupIDs[0].RelativeID != pb.DefaultPrimaryGroupRID {
+		t.Errorf("first group must be the primary RID")
+	}
+	if kvi.GroupIDs[1].RelativeID != ridFromName("g1") || kvi.GroupIDs[2].RelativeID != ridFromName("g2") {
+		t.Errorf("group RIDs not derived from names")
+	}
+}
+
+func TestBuildScopeFilterIntersection(t *testing.T) {
+	pb, _ := NewSyntheticPACBuilder("S-1-5-21-1-2-3")
+	pb.ScopeFilter = ConfigMapFilter{ScopeGroups: map[string][]string{"s.read": {"g1", "g3"}}}
+	id := Identity{Subject: "alice", Claims: json.RawMessage(`{"groups":["g1","g2","g3"],"scope":"s.read"}`)}
+	kvi, _, err := pb.Build(id, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kvi.GroupCount != 3 {
+		t.Fatalf("GroupCount = %d, want 3 (primary + g1 + g3)", kvi.GroupCount)
+	}
+	gotRIDs := map[uint32]bool{}
+	for _, g := range kvi.GroupIDs {
+		gotRIDs[g.RelativeID] = true
+	}
+	if !gotRIDs[ridFromName("g1")] || !gotRIDs[ridFromName("g3")] || gotRIDs[ridFromName("g2")] {
+		t.Errorf("intersection wrong: %v", gotRIDs)
+	}
+}
+
+func TestBuildEmptyScopeWithFilterIsPrimaryOnly(t *testing.T) {
+	pb, _ := NewSyntheticPACBuilder("S-1-5-21-1-2-3")
+	pb.ScopeFilter = ConfigMapFilter{ScopeGroups: map[string][]string{"s.read": {"g1"}}}
+	id := Identity{Subject: "alice", Claims: json.RawMessage(`{"groups":["g1"]}`)}
+	kvi, _, err := pb.Build(id, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kvi.GroupCount != 1 {
+		t.Fatalf("no scope granted ⇒ primary group only, got GroupCount %d", kvi.GroupCount)
+	}
+}
+
+func TestBuildGroupOverride(t *testing.T) {
+	pb, _ := NewSyntheticPACBuilder("S-1-5-21-1-2-3")
+	pb.GroupOverrides = map[string]uint32{"g1": 4242}
+	id := Identity{Subject: "alice", Claims: json.RawMessage(`{"groups":["g1"]}`)}
+	kvi, _, _ := pb.Build(id, time.Unix(1700000000, 0))
+	found := false
+	for _, g := range kvi.GroupIDs {
+		if g.RelativeID == 4242 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("override RID 4242 not used for g1")
+	}
+}
+
+func TestBuildDeterministic(t *testing.T) {
+	pb, _ := NewSyntheticPACBuilder("S-1-5-21-1-2-3")
+	id := Identity{Subject: "alice", Claims: json.RawMessage(`{"groups":["g1","g2"]}`)}
+	a, _, _ := pb.Build(id, time.Unix(1700000000, 0))
+	b, _, _ := pb.Build(id, time.Unix(1700000000, 0))
+	if !reflect.DeepEqual(a.GroupIDs, b.GroupIDs) || a.UserID != b.UserID {
+		t.Error("Build is not deterministic for the same identity")
 	}
 }
