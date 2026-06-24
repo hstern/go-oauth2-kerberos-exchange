@@ -4,15 +4,20 @@
 package kerbexchange
 
 import (
+	"bytes"
+	"log"
 	"testing"
 	"time"
 
 	"github.com/go-krb5/krb5/crypto"
+	"github.com/go-krb5/krb5/iana/adtype"
 	"github.com/go-krb5/krb5/iana/etypeID"
 	"github.com/go-krb5/krb5/iana/keyusage"
 	"github.com/go-krb5/krb5/iana/nametype"
 	"github.com/go-krb5/krb5/messages"
+	"github.com/go-krb5/krb5/pac"
 	"github.com/go-krb5/krb5/types"
+	"github.com/go-krb5/x/encoding/asn1"
 )
 
 func TestDirectMinterMintRejectsBadEndTime(t *testing.T) {
@@ -91,4 +96,63 @@ func TestDirectMinterMintRoundTrip(t *testing.T) {
 	if len(etp.AuthorizationData) != 0 {
 		t.Errorf("expected empty AuthorizationData (Phase 4 PAC slot), got %d entries", len(etp.AuthorizationData))
 	}
+}
+
+func TestDirectMinterEmbedsPAC(t *testing.T) {
+	ks := NewKeytabSource(testKeytab(t), "EXAMPLE.COM")
+	pb, _ := NewSyntheticPACBuilder("S-1-5-21-1111111111-2222222222-3333333333")
+	m := NewDirectMinter(ks, "EXAMPLE.COM").WithPACBuilder(pb)
+	spn := ServicePrincipal{Service: "imap", Host: "mail.example.com", Realm: "EXAMPLE.COM"}
+	end := time.Now().Add(5 * time.Minute)
+	mt, err := m.Mint(spn, MintOptions{
+		ClientName:  types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"alice"}},
+		ClientRealm: "EXAMPLE.COM",
+		Identity:    Identity{Subject: "alice", Expiry: end},
+		AuthTime:    time.Now().Add(-time.Minute),
+		EndTime:     end,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverKey, _, _ := ks.ServiceKey(spn, etypeID.AES256_CTS_HMAC_SHA1_96)
+	dec, err := crypto.DecryptMessage(mt.Ticket.EncPart.Cipher, serverKey, keyusage.KDC_REP_TICKET)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var etp messages.EncTicketPart
+	if err := etp.Unmarshal(dec); err != nil {
+		t.Fatal(err)
+	}
+	if len(etp.AuthorizationData) == 0 {
+		t.Fatal("expected a PAC in AuthorizationData")
+	}
+	pacBytes := extractPACForTest(t, etp.AuthorizationData)
+	var pt pac.PACType
+	if err := pt.Unmarshal(pacBytes); err != nil {
+		t.Fatal(err)
+	}
+	if err := pt.ProcessPACInfoBuffers(serverKey, log.New(bytes.NewBufferString(""), "", 0)); err != nil {
+		t.Fatalf("embedded PAC failed verify: %v", err)
+	}
+}
+
+// extractPACForTest unwraps AD-IF-RELEVANT -> AD-WIN2K-PAC and returns the PAC bytes.
+func extractPACForTest(t *testing.T, ad types.AuthorizationData) []byte {
+	t.Helper()
+	for _, e := range ad {
+		if e.ADType != adtype.ADIfRelevant {
+			continue
+		}
+		var inner types.AuthorizationData
+		if _, err := asn1.Unmarshal(e.ADData, &inner); err != nil {
+			t.Fatal(err)
+		}
+		for _, ie := range inner {
+			if ie.ADType == adtype.ADWin2KPAC {
+				return ie.ADData
+			}
+		}
+	}
+	t.Fatal("no AD-WIN2K-PAC found")
+	return nil
 }
