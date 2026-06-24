@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-krb5/krb5/iana/etypeID"
 	"github.com/go-krb5/krb5/pac"
+	"github.com/go-krb5/x/rpc/mstypes"
 )
 
 func TestSyntheticPACBuilderVerifies(t *testing.T) {
@@ -41,5 +42,41 @@ func TestSyntheticPACBuilderVerifies(t *testing.T) {
 	}
 	if pt.ClientInfo.Name != "alice" {
 		t.Errorf("client info name = %q, want alice", pt.ClientInfo.Name)
+	}
+}
+
+func TestParseDomainSIDRejectsLargeAuthority(t *testing.T) {
+	t.Run("large authority rejected", func(t *testing.T) {
+		_, err := NewSyntheticPACBuilder("S-1-300-21-1-2-3")
+		if err == nil {
+			t.Fatal("expected error for authority 300, got nil")
+		}
+	})
+
+	t.Run("standard NT authority accepted", func(t *testing.T) {
+		_, err := NewSyntheticPACBuilder("S-1-5-21-1111111111-2222222222-3333333333")
+		if err != nil {
+			t.Fatalf("unexpected error for valid SID: %v", err)
+		}
+	})
+}
+
+func TestBuildLogOnTimeMatchesAuthTime(t *testing.T) {
+	pb, err := NewSyntheticPACBuilder("S-1-5-21-1111111111-2222222222-3333333333")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	authTime := time.Unix(1700000000, 0)
+	id := Identity{Subject: "bob", Claims: json.RawMessage(`{}`), Expiry: authTime.Add(time.Hour)}
+
+	kvi, _, err := pb.Build(id, authTime)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	want := mstypes.GetFileTime(authTime.UTC())
+	if kvi.LogOnTime != want {
+		t.Errorf("LogOnTime = %+v, want %+v", kvi.LogOnTime, want)
 	}
 }

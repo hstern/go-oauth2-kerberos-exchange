@@ -63,12 +63,12 @@ func NewSyntheticPACBuilder(domainSID string) (*SyntheticPACBuilder, error) {
 // Build constructs a minimal KerbValidationInfo and ClientInfo for id.
 // authTime is stored in the ClientInfo ClientID field per the MS-PAC spec.
 func (b *SyntheticPACBuilder) Build(id Identity, authTime time.Time) (*pac.KerbValidationInfo, *pac.ClientInfo, error) {
-	now := mstypes.GetFileTime(time.Now().UTC())
 	uid := ridFromSubject(id.Subject)
 
 	kvi := &pac.KerbValidationInfo{
-		// LogOnTime: authentication timestamp.
-		LogOnTime: now,
+		// LogOnTime: the caller-supplied authentication instant, matching the
+		// ClientInfo ClientID field below.
+		LogOnTime: mstypes.GetFileTime(authTime.UTC()),
 		// LogOffTime / KickOffTime: "never" per MS convention when no session
 		// expiry is tracked at the KDC level.
 		LogOffTime:  neverFileTime,
@@ -149,7 +149,13 @@ func parseDomainSID(s string) (mstypes.RPCSID, error) {
 	if err != nil {
 		return mstypes.RPCSID{}, fmt.Errorf("kerbexchange: invalid domain SID %q: authority: %w", s, err)
 	}
-	// NT authority is always 5; sub-authorities start at parts[3].
+	// This minimal parser only populates the low byte of the 48-bit identifier
+	// authority field.  Values > 0xFF require the high bytes, which we do not
+	// handle — reject them rather than silently truncate.
+	if authVal > 0xFF {
+		return mstypes.RPCSID{}, fmt.Errorf("kerbexchange: identifier authority %d out of range (only the low byte is representable here)", authVal)
+	}
+	// Sub-authorities start at parts[3].
 	subParts := parts[3:]
 	subs := make([]uint32, len(subParts))
 	for i, p := range subParts {
@@ -161,8 +167,9 @@ func parseDomainSID(s string) (mstypes.RPCSID, error) {
 	}
 
 	var ia [6]byte
-	// Authority is big-endian 48-bit value; authVal fits in the low byte for
-	// NT authority (5).
+	// Authority is a big-endian 48-bit value.  We write the parsed authVal into
+	// the low byte (ia[5]); the high bytes remain zero.  Values > 0xFF are
+	// rejected above so no truncation occurs here.
 	ia[5] = byte(authVal)
 
 	return mstypes.RPCSID{
