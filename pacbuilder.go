@@ -1,0 +1,195 @@
+// Copyright 2026 The go-oauth2-kerberos-exchange Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package kerbexchange
+
+import (
+	"fmt"
+	"hash/fnv"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf16"
+
+	"github.com/go-krb5/krb5/pac"
+	"github.com/go-krb5/x/rpc/mstypes"
+)
+
+// neverFileTime is the MS "never" sentinel: 0x7FFFFFFFFFFFFFFF (max int64),
+// split into low/high 32-bit words.  Windows uses this for fields that have
+// no expiry (e.g. PasswordMustChange when the password never expires).
+var neverFileTime = mstypes.FileTime{
+	LowDateTime:  0xFFFFFFFF,
+	HighDateTime: 0x7FFFFFFF,
+}
+
+// PACBuilder constructs the PAC payloads for a given identity at authentication
+// time.  Implementations are free to derive group membership from the Claims
+// field or from an external directory.
+type PACBuilder interface {
+	Build(id Identity, authTime time.Time) (*pac.KerbValidationInfo, *pac.ClientInfo, error)
+}
+
+// SyntheticPACBuilder builds a minimal, self-contained PAC from the identity's
+// Subject claim alone.  No directory lookup is performed.  Group membership is
+// limited to the primary group; ExtraSIDs and ResourceGroup fields are left
+// empty.  This is suitable for environments where the downstream Kerberos
+// service only needs a verifiable identity principal, not full AD group
+// expansion.
+type SyntheticPACBuilder struct {
+	// DomainSID is the authority SID of the synthetic Kerberos domain
+	// (e.g. S-1-5-21-a-b-c).
+	DomainSID mstypes.RPCSID
+
+	// DefaultPrimaryGroupRID is the RID of the primary group assigned to
+	// every synthesized identity.  Domain Users (513) is the conventional
+	// default.
+	DefaultPrimaryGroupRID uint32
+}
+
+// NewSyntheticPACBuilder parses domainSID (format "S-1-5-21-a-b-c") and
+// returns a SyntheticPACBuilder ready to use.
+func NewSyntheticPACBuilder(domainSID string) (*SyntheticPACBuilder, error) {
+	sid, err := parseDomainSID(domainSID)
+	if err != nil {
+		return nil, err
+	}
+	return &SyntheticPACBuilder{
+		DomainSID:              sid,
+		DefaultPrimaryGroupRID: 513, // Domain Users
+	}, nil
+}
+
+// Build constructs a minimal KerbValidationInfo and ClientInfo for id.
+// authTime is stored in the ClientInfo ClientID field per the MS-PAC spec.
+func (b *SyntheticPACBuilder) Build(id Identity, authTime time.Time) (*pac.KerbValidationInfo, *pac.ClientInfo, error) {
+	now := mstypes.GetFileTime(time.Now().UTC())
+	uid := ridFromSubject(id.Subject)
+
+	kvi := &pac.KerbValidationInfo{
+		// LogOnTime: authentication timestamp.
+		LogOnTime: now,
+		// LogOffTime / KickOffTime: "never" per MS convention when no session
+		// expiry is tracked at the KDC level.
+		LogOffTime:  neverFileTime,
+		KickOffTime: neverFileTime,
+		// Password fields: zero (PasswordLastSet/PasswordCanChange) means "no
+		// password history"; PasswordMustChange "never" means the synthetic
+		// credential has no password-change policy.
+		PasswordLastSet:    mstypes.FileTime{},
+		PasswordCanChange:  mstypes.FileTime{},
+		PasswordMustChange: neverFileTime,
+
+		EffectiveName: rpcUnicode(id.Subject),
+
+		UserID:         uid,
+		PrimaryGroupID: b.DefaultPrimaryGroupRID,
+
+		// GroupCount / GroupIDs: at minimum the primary group.
+		GroupCount: 1,
+		GroupIDs: []mstypes.GroupMembership{
+			{
+				RelativeID: b.DefaultPrimaryGroupRID,
+				// SE_GROUP_MANDATORY | SE_GROUP_ENABLED_BY_DEFAULT | SE_GROUP_ENABLED
+				Attributes: 0x7,
+			},
+		},
+
+		// UserFlags: NETLOGON_EXTRA_SIDS bit (26) is NOT set because ExtraSIDs
+		// is empty.  Leave zero.
+		UserFlags: 0,
+
+		// LogonDomainName / LogonDomainID: the synthetic domain authority.
+		LogonDomainName: rpcUnicode("SYNTHETIC"),
+		LogonDomainID:   b.DomainSID,
+
+		// UserAccountControl: normal account (UF_NORMAL_ACCOUNT = 0x200) plus
+		// UF_DONT_EXPIRE_PASSWD (0x10000).
+		UserAccountControl: 0x10200,
+
+		// LastSuccessfulILogon / LastFailedILogon: "never" sentinel per MS spec
+		// when the DC does not track these.
+		LastSuccessfulILogon: neverFileTime,
+		LastFailedILogon:     neverFileTime,
+
+		// SIDCount / ExtraSIDs: empty — no extra SIDs for this phase.
+		SIDCount:  0,
+		ExtraSIDs: nil,
+
+		// ResourceGroup fields: empty.
+		ResourceGroupCount: 0,
+		ResourceGroupIDs:   nil,
+	}
+
+	ci := &pac.ClientInfo{
+		ClientID:   mstypes.GetFileTime(authTime.UTC()),
+		NameLength: uint16(len(utf16.Encode([]rune(id.Subject))) * 2),
+		Name:       id.Subject,
+	}
+
+	return kvi, ci, nil
+}
+
+// parseDomainSID parses an "S-1-5-21-a-b-c" SID string into an RPCSID.
+// The authority value {0,0,0,0,0,5} is the NT SID authority.
+func parseDomainSID(s string) (mstypes.RPCSID, error) {
+	s = strings.TrimSpace(s)
+	parts := strings.Split(s, "-")
+	// Minimum valid domain SID: S-1-5-21-a-b-c → 7 parts
+	// parts[0]="S", [1]="1", [2]="5", [3]="21", [4..6]="a","b","c"
+	if len(parts) < 7 || parts[0] != "S" || parts[1] != "1" {
+		return mstypes.RPCSID{}, fmt.Errorf("kerbexchange: invalid domain SID %q: want S-1-5-21-a-b-c", s)
+	}
+
+	// Sub-authorities start at index 2 (authority value) through end, excluding
+	// index 0 ("S") and index 1 ("1" = revision).
+	// The identifier authority is encoded as a single uint48; for {0,0,0,0,0,5}
+	// the decimal authority value is 5.
+	authVal, err := strconv.ParseUint(parts[2], 10, 64)
+	if err != nil {
+		return mstypes.RPCSID{}, fmt.Errorf("kerbexchange: invalid domain SID %q: authority: %w", s, err)
+	}
+	// NT authority is always 5; sub-authorities start at parts[3].
+	subParts := parts[3:]
+	subs := make([]uint32, len(subParts))
+	for i, p := range subParts {
+		v, err := strconv.ParseUint(p, 10, 32)
+		if err != nil {
+			return mstypes.RPCSID{}, fmt.Errorf("kerbexchange: invalid domain SID %q: sub-authority %d: %w", s, i, err)
+		}
+		subs[i] = uint32(v)
+	}
+
+	var ia [6]byte
+	// Authority is big-endian 48-bit value; authVal fits in the low byte for
+	// NT authority (5).
+	ia[5] = byte(authVal)
+
+	return mstypes.RPCSID{
+		Revision:            1,
+		SubAuthorityCount:   uint8(len(subs)),
+		IdentifierAuthority: ia,
+		SubAuthority:        subs,
+	}, nil
+}
+
+// ridFromSubject derives a deterministic, non-zero RID from a subject string
+// using FNV-32a.  The result is OR'd with 0x40000000 to avoid collision with
+// well-known Windows RIDs (which live below 0x400).
+func ridFromSubject(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32() | 0x40000000
+}
+
+// rpcUnicode constructs an RPCUnicodeString from a plain Go string.
+// Length and MaximumLength are the byte count of the UTF-16LE encoding
+// (2 bytes per code unit, no null terminator per MS-PAC convention).
+func rpcUnicode(s string) mstypes.RPCUnicodeString {
+	byteLen := uint16(len(utf16.Encode([]rune(s))) * 2)
+	return mstypes.RPCUnicodeString{
+		Length:        byteLen,
+		MaximumLength: byteLen,
+		Value:         s,
+	}
+}
