@@ -18,6 +18,9 @@ func testKeytab(t *testing.T) *keytab.Keytab {
 	if err := kt.AddEntry("imap/mail.example.com", "EXAMPLE.COM", "s3cret", time.Unix(1000, 0), 1, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
 		t.Fatalf("AddEntry: %v", err)
 	}
+	if err := kt.AddEntry("krbtgt/EXAMPLE.COM", "EXAMPLE.COM", "kdcsecret", time.Unix(1000, 0), 1, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
+		t.Fatalf("AddEntry krbtgt: %v", err)
+	}
 	return kt
 }
 
@@ -38,5 +41,16 @@ func TestKeytabSourceUnknownSPN(t *testing.T) {
 	spn := ServicePrincipal{Service: "smtp", Host: "other.example.com", Realm: "EXAMPLE.COM"}
 	if _, _, err := ks.ServiceKey(spn, etypeID.AES256_CTS_HMAC_SHA1_96); !errors.Is(err, ErrNoServiceKey) {
 		t.Errorf("got %v, want ErrNoServiceKey", err)
+	}
+}
+
+func TestKeytabSourceKDCSigningKey(t *testing.T) {
+	ks := NewKeytabSource(testKeytab(t), "EXAMPLE.COM")
+	key, kvno, err := ks.KDCSigningKey(etypeID.AES256_CTS_HMAC_SHA1_96)
+	if err != nil {
+		t.Fatalf("KDCSigningKey: %v", err)
+	}
+	if len(key.KeyValue) == 0 || kvno == 0 {
+		t.Errorf("expected a KDC signing key and kvno, got key len %d kvno %d", len(key.KeyValue), kvno)
 	}
 }
