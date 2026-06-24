@@ -23,6 +23,8 @@ func TestDefaultClaimsMapper(t *testing.T) {
 		{"custom groups claim", `{"roles":["x"]}`, "roles", []string{"x"}, nil},
 		{"missing groups", `{"scope":"s1"}`, "", nil, []string{"s1"}},
 		{"empty claims", `{}`, "", nil, nil},
+		{"array with empty strings", `{"groups":["","a"]}`, "", []string{"a"}, nil},
+		{"array of all empty strings", `{"groups":["",""]}`, "", nil, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -48,5 +50,24 @@ func TestDefaultClaimsMapperMalformed(t *testing.T) {
 	id := Identity{Subject: "alice", Claims: json.RawMessage(`{not json`)}
 	if _, _, _, err := (DefaultClaimsMapper{}).Map(id); err == nil {
 		t.Error("expected error on malformed claims")
+	}
+}
+
+func TestDefaultClaimsMapperMistypedValue(t *testing.T) {
+	cases := []struct {
+		name   string
+		claims string
+	}{
+		{"numeric groups", `{"groups":42}`},
+		{"array of numbers", `{"groups":[1,2]}`},
+		{"object groups", `{"groups":{"x":1}}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			id := Identity{Subject: "alice", Claims: json.RawMessage(tc.claims)}
+			if _, _, _, err := (DefaultClaimsMapper{}).Map(id); err == nil {
+				t.Errorf("Map(%s): expected error for mistyped claim, got nil", tc.claims)
+			}
+		})
 	}
 }
