@@ -30,3 +30,12 @@ jobs:
         with: { go-version: "1.26", cache: true }
       - uses: golangci/golangci-lint-action@v7
         with: { version: v2.12.2 }
+  interop:
+    name: interop (MIT krb5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Go-minted ticket accepted by MIT krb5
+        run: >-
+          docker compose -f test/interop/docker-compose.yml up --build
+          --exit-code-from interop --abort-on-container-exit
