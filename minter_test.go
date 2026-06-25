@@ -156,3 +156,52 @@ func extractPACForTest(t *testing.T, ad types.AuthorizationData) []byte {
 	t.Fatal("no AD-WIN2K-PAC found")
 	return nil
 }
+
+// TestDirectMinterEmitsUTCKerberosTimes guards against the local-timezone
+// KerberosTime regression: a minter handed times in a non-UTC zone (callers
+// commonly pass time.Now()) must still emit RFC 4120 KerberosTime values —
+// 15-byte UTC GeneralizedTimes ending in 'Z'. The 19-byte zone-offset form is
+// accepted by gokrb5's lenient parser but rejected by strict acceptors (MIT
+// krb5, AD/SSSD, Heimdal) with an ASN.1 length error. Minting without a PAC
+// keeps the EncTicketPart free of binary blobs, so scanning its ASN.1
+// GeneralizedTime (tag 0x18) fields is reliable.
+func TestDirectMinterEmitsUTCKerberosTimes(t *testing.T) {
+	ks := NewKeytabSource(testKeytab(t), "EXAMPLE.COM")
+	m := NewDirectMinter(ks, "EXAMPLE.COM")
+	spn := ServicePrincipal{Service: "imap", Host: "mail.example.com", Realm: "EXAMPLE.COM"}
+
+	loc := time.FixedZone("minus3", -3*60*60) // a deliberately non-UTC zone
+	now := time.Now().In(loc)
+	mt, err := m.Mint(spn, MintOptions{
+		ClientName:  types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"alice"}},
+		ClientRealm: "EXAMPLE.COM",
+		AuthTime:    now.Add(-time.Minute),
+		EndTime:     now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	skey, _, err := ks.ServiceKey(spn, etypeID.AES256_CTS_HMAC_SHA1_96)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain, err := crypto.DecryptMessage(mt.Ticket.EncPart.Cipher, skey, keyusage.KDC_REP_TICKET)
+	if err != nil {
+		t.Fatalf("decrypt EncPart: %v", err)
+	}
+
+	if bytes.Contains(plain, []byte{0x18, 19}) {
+		t.Error("EncTicketPart carries a 19-byte zone-offset GeneralizedTime; KerberosTime must be 15-byte UTC")
+	}
+	if !bytes.Contains(plain, []byte{0x18, 15}) {
+		t.Fatal("EncTicketPart has no 15-byte UTC GeneralizedTime (expected authtime/starttime/endtime)")
+	}
+	for i := 0; i+2+15 <= len(plain); i++ {
+		if plain[i] == 0x18 && plain[i+1] == 15 {
+			if v := plain[i+2 : i+2+15]; v[14] != 'Z' {
+				t.Errorf("KerberosTime %q does not end in 'Z' (not UTC)", v)
+			}
+		}
+	}
+}

@@ -134,10 +134,21 @@ func (m *DirectMinter) Mint(spn ServicePrincipal, opts MintOptions) (MintedTicke
 		crealm = m.defaultRealm
 	}
 
-	// Resolve start time.
-	startTime := opts.StartTime
-	if startTime.IsZero() {
-		startTime = opts.AuthTime
+	// Normalize all KerberosTime values to UTC. RFC 4120 §5.2.3 defines
+	// KerberosTime as UTC ("...Z" GeneralizedTime); a value carrying a numeric
+	// zone offset (e.g. from a local-zone time.Time) is rejected by strict
+	// acceptors — MIT krb5, AD/SSSD, and Heimdal fail it with an ASN.1 length
+	// error. Callers commonly pass time.Now(), which is local, so normalize
+	// here rather than relying on the caller. (gokrb5's lenient parser accepts
+	// the offset form, which is why pure-Go round-trips do not catch this.)
+	authTime := opts.AuthTime.UTC()
+	endTime := opts.EndTime.UTC()
+	renewTill := opts.RenewTill.UTC()
+
+	// Resolve start time (defaults to AuthTime when unset).
+	startTime := opts.StartTime.UTC()
+	if opts.StartTime.IsZero() {
+		startTime = authTime
 	}
 
 	// Build ticket flags: forwardable + renewable (common defaults for
@@ -151,16 +162,16 @@ func (m *DirectMinter) Mint(spn ServicePrincipal, opts MintOptions) (MintedTicke
 		CRealm:    crealm,
 		CName:     opts.ClientName,
 		Transited: messages.TransitedEncoding{},
-		AuthTime:  opts.AuthTime,
+		AuthTime:  authTime,
 		StartTime: startTime,
-		EndTime:   opts.EndTime,
-		RenewTill: opts.RenewTill,
+		EndTime:   endTime,
+		RenewTill: renewTill,
 	}
 
 	// If a PACBuilder is configured, build and sign the PAC, then embed it in
 	// AuthorizationData as AD-IF-RELEVANT{ AD-WIN2K-PAC }.
 	if m.pacBuilder != nil {
-		kvi, ci, err := m.pacBuilder.Build(opts.Identity, opts.AuthTime)
+		kvi, ci, err := m.pacBuilder.Build(opts.Identity, authTime)
 		if err != nil {
 			return MintedTicket{}, fmt.Errorf("kerbexchange: build PAC: %w", err)
 		}
@@ -217,7 +228,7 @@ func (m *DirectMinter) Mint(spn ServicePrincipal, opts MintOptions) (MintedTicke
 		ClientName:  opts.ClientName,
 		ClientRealm: crealm,
 		Target:      ServicePrincipal{Service: spn.Service, Host: spn.Host, Realm: srealm},
-		AuthTime:    opts.AuthTime,
-		EndTime:     opts.EndTime,
+		AuthTime:    authTime,
+		EndTime:     endTime,
 	}, nil
 }
