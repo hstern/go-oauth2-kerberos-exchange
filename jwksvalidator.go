@@ -50,6 +50,16 @@ func WithClockSkew(d time.Duration) JWKSOption {
 // substitution attacks including "alg:none" and HMAC confusion. Only keys
 // whose alg field is RS256 or ES256 will ever match; tokens that would require
 // any other algorithm are rejected.
+//
+// Allowlist trust boundary: the RS256/ES256 allowlist is enforced as "the key
+// set must contain at least one key with an allowed algorithm." It does NOT
+// independently reject a JWKS that also publishes keys with disallowed
+// algorithms — a JWKS containing both an RS256 key and an unexpected key type
+// will still pass. This is intentional: the security model trusts the JWKS
+// endpoint itself, and a hostile issuer that controls that endpoint could
+// equally publish a malicious RS256 key. Operators MUST ensure the JWKS URL
+// is obtained from a trustworthy discovery document over HTTPS and is not
+// attacker-controlled.
 type JWKSValidator struct {
 	keySet jwk.Set
 	cfg    jwksValidatorConfig
