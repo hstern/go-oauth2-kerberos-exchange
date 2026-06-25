@@ -4,22 +4,30 @@
 // Command mint is an interop fixture: it generates a service keytab, mints a
 // Kerberos service ticket (carrying a signed synthetic PAC) for that service
 // using this library's DirectMinter, and writes the resulting GSSAPI
-// initial-context (AP-REQ) token. A real MIT krb5 GSSAPI acceptor loaded with
-// the same keytab can then validate the token — proving Go-minted credentials
-// interoperate with the reference C implementation.
+// initial-context (AP-REQ) token plus a PAC-verify bundle (the PAC bytes and
+// the two signing keys). A real MIT krb5 GSSAPI acceptor validates the token,
+// and krb5_pac_verify checks the PAC — proving Go-minted credentials
+// interoperate with the reference C implementation at both layers.
 package main
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"time"
 
+	"github.com/go-krb5/krb5/crypto"
+	"github.com/go-krb5/krb5/iana/adtype"
 	"github.com/go-krb5/krb5/iana/etypeID"
+	"github.com/go-krb5/krb5/iana/keyusage"
 	"github.com/go-krb5/krb5/iana/nametype"
 	"github.com/go-krb5/krb5/keytab"
+	"github.com/go-krb5/krb5/messages"
 	"github.com/go-krb5/krb5/types"
+	"github.com/go-krb5/x/encoding/asn1"
 
 	kerb "github.com/hstern/go-oauth2-kerberos-exchange"
 )
@@ -28,6 +36,7 @@ func main() {
 	var (
 		keytabPath = flag.String("keytab", "/tmp/interop.keytab", "path to write the shared service keytab")
 		tokenPath  = flag.String("token", "/tmp/interop.token.b64", "path to write the base64 GSSAPI AP-REQ token")
+		bundlePath = flag.String("bundle", "", "if set, write a PAC-verify bundle (PAC + signing keys) here")
 		realm      = flag.String("realm", "EXAMPLE.COM", "Kerberos realm")
 		service    = flag.String("service", "HTTP", "target service component")
 		host       = flag.String("host", "interop.example.com", "target host component")
@@ -64,6 +73,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("pac builder: %v", err)
 	}
+	authTime := now.Add(-30 * time.Second)
 	minter := kerb.NewDirectMinter(ks, *realm).WithPACBuilder(pac)
 	mt, err := minter.Mint(
 		kerb.ServicePrincipal{Service: *service, Host: *host, Realm: *realm},
@@ -71,7 +81,7 @@ func main() {
 			ClientName:  types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{*client}},
 			ClientRealm: *realm,
 			Identity:    kerb.Identity{Subject: *client, Expiry: now.Add(time.Hour)},
-			AuthTime:    now.Add(-30 * time.Second),
+			AuthTime:    authTime,
 			EndTime:     now.Add(5 * time.Minute),
 		},
 	)
@@ -87,5 +97,62 @@ func main() {
 	if err := os.WriteFile(*tokenPath, []byte(base64.StdEncoding.EncodeToString(token)), 0o600); err != nil {
 		log.Fatalf("write token: %v", err)
 	}
+
+	// 4. Optionally emit a PAC-verify bundle: the PAC bytes plus the service key
+	//    (Server signature) and the krbtgt key (KDC signature), which the
+	//    reference krb5_pac_verify needs.
+	if *bundlePath != "" {
+		writeBundle(*bundlePath, kt, mt, *service, *host, *realm, *client, authTime)
+	}
+
 	log.Printf("minted: keytab=%s token=%s spn=%s/%s@%s client=%s", *keytabPath, *tokenPath, *service, *host, *realm, *client)
+}
+
+// writeBundle decrypts the minted ticket, extracts the embedded PAC, and writes
+// the PAC bytes plus both signing keys (KEY=hex lines) for the C PAC verifier.
+func writeBundle(path string, kt *keytab.Keytab, mt kerb.MintedTicket, service, host, realm, client string, authTime time.Time) {
+	svc, _, err := kt.GetEncryptionKey(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{service, host}}, realm, 0, etypeID.AES256_CTS_HMAC_SHA1_96)
+	if err != nil {
+		log.Fatalf("service key: %v", err)
+	}
+	tgt, _, err := kt.GetEncryptionKey(types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{"krbtgt", realm}}, realm, 0, etypeID.AES256_CTS_HMAC_SHA1_96)
+	if err != nil {
+		log.Fatalf("krbtgt key: %v", err)
+	}
+	plain, err := crypto.DecryptMessage(mt.Ticket.EncPart.Cipher, svc, keyusage.KDC_REP_TICKET)
+	if err != nil {
+		log.Fatalf("decrypt EncPart: %v", err)
+	}
+	bundle := fmt.Sprintf("PAC=%s\nSERVERKEY=%s\nKDCKEY=%s\nAUTHTIME=%d\nCLIENT=%s@%s\n",
+		hex.EncodeToString(extractPAC(plain)),
+		hex.EncodeToString(svc.KeyValue), hex.EncodeToString(tgt.KeyValue),
+		authTime.UTC().Unix(), client, realm)
+	if err := os.WriteFile(path, []byte(bundle), 0o600); err != nil {
+		log.Fatalf("write bundle: %v", err)
+	}
+}
+
+// extractPAC pulls the AD-WIN2K-PAC bytes out of a decrypted EncTicketPart's
+// AD-IF-RELEVANT authorization-data.
+func extractPAC(encTicketPart []byte) []byte {
+	var etp messages.EncTicketPart
+	if err := etp.Unmarshal(encTicketPart); err != nil {
+		log.Fatalf("unmarshal EncTicketPart: %v", err)
+	}
+	for _, e := range etp.AuthorizationData {
+		if e.ADType != adtype.ADIfRelevant {
+			continue
+		}
+		var inner types.AuthorizationData
+		if _, err := asn1.Unmarshal(e.ADData, &inner); err != nil {
+			log.Fatalf("unmarshal AD-IF-RELEVANT: %v", err)
+		}
+		for _, ie := range inner {
+			if ie.ADType == adtype.ADWin2KPAC {
+				return ie.ADData
+			}
+		}
+	}
+	log.Fatal("no AD-WIN2K-PAC in the minted ticket")
+	return nil
 }
