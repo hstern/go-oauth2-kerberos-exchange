@@ -1,0 +1,10 @@
+# Phase 6 interop: build the harness image and run the mint→accept check.
+# Usage (from repo root):
+#   docker compose -f test/interop/docker-compose.yml up --build \
+#     --exit-code-from interop --abort-on-container-exit
+# Exits non-zero if the MIT krb5 acceptor rejects the Go-minted ticket.
+services:
+  interop:
+    build:
+      context: ../..
+      dockerfile: test/interop/Dockerfile
