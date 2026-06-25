@@ -41,14 +41,12 @@ func main() {
 	//    signature). The same file is read by both this minter and the C acceptor.
 	kt := keytab.New()
 	now := time.Now()
-	for _, p := range []struct{ name string }{
-		{*service + "/" + *host},
-		{"krbtgt/" + *realm},
-	} {
-		// AddEntry derives the key from the password; both sides read the stored key.
-		pn := principalString(p.name)
+	// Both the service key (encrypts the ticket) and the krbtgt key (signs the
+	// PAC KDC signature) live in the keytab; AddEntry derives each from the
+	// password and both this minter and the acceptor read the stored key.
+	for _, pn := range []string{*service + "/" + *host, "krbtgt/" + *realm} {
 		if err := kt.AddEntry(pn, *realm, *password, now, 1, etypeID.AES256_CTS_HMAC_SHA1_96); err != nil {
-			log.Fatalf("keytab AddEntry %q: %v", p.name, err)
+			log.Fatalf("keytab AddEntry %q: %v", pn, err)
 		}
 	}
 	ktf, err := os.Create(*keytabPath)
@@ -91,7 +89,3 @@ func main() {
 	}
 	log.Printf("minted: keytab=%s token=%s spn=%s/%s@%s client=%s", *keytabPath, *tokenPath, *service, *host, *realm, *client)
 }
-
-// principalString is the keytab principal component form: "service/host" or a
-// single name. keytab.AddEntry takes the full principal string before the realm.
-func principalString(s string) string { return s }

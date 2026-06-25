@@ -191,17 +191,54 @@ func TestDirectMinterEmitsUTCKerberosTimes(t *testing.T) {
 		t.Fatalf("decrypt EncPart: %v", err)
 	}
 
-	if bytes.Contains(plain, []byte{0x18, 19}) {
-		t.Error("EncTicketPart carries a 19-byte zone-offset GeneralizedTime; KerberosTime must be 15-byte UTC")
+	times := collectGeneralizedTimes(plain)
+	if len(times) < 3 {
+		t.Fatalf("expected >=3 KerberosTime fields (authtime/starttime/endtime), found %d", len(times))
 	}
-	if !bytes.Contains(plain, []byte{0x18, 15}) {
-		t.Fatal("EncTicketPart has no 15-byte UTC GeneralizedTime (expected authtime/starttime/endtime)")
-	}
-	for i := 0; i+2+15 <= len(plain); i++ {
-		if plain[i] == 0x18 && plain[i+1] == 15 {
-			if v := plain[i+2 : i+2+15]; v[14] != 'Z' {
-				t.Errorf("KerberosTime %q does not end in 'Z' (not UTC)", v)
-			}
+	for _, v := range times {
+		// RFC 4120 KerberosTime: "YYYYMMDDHHMMSSZ" — 15 bytes, UTC, trailing 'Z'.
+		if len(v) != 15 || v[14] != 'Z' {
+			t.Errorf("KerberosTime %q is not 15-byte UTC (must end in 'Z')", v)
 		}
 	}
+}
+
+// collectGeneralizedTimes returns every ASN.1 GeneralizedTime (tag 0x18) value
+// reachable through constructed nodes of a DER blob. It descends only
+// constructed tags and treats primitives (the OCTET STRINGs holding the random
+// session key and the opaque PAC) as leaves, so the walk visits exactly the
+// real KerberosTime fields — deterministic, with no risk of matching random
+// key bytes.
+func collectGeneralizedTimes(der []byte) [][]byte {
+	var times [][]byte
+	var walk func(b []byte)
+	walk = func(b []byte) {
+		for i := 0; i+1 < len(b); {
+			tag := b[i]
+			i++
+			l := int(b[i])
+			i++
+			if l&0x80 != 0 {
+				n := l & 0x7f
+				l = 0
+				for j := 0; j < n && i < len(b); j++ {
+					l = l<<8 | int(b[i])
+					i++
+				}
+			}
+			if i+l > len(b) {
+				return
+			}
+			content := b[i : i+l]
+			switch {
+			case tag == 0x18: // GeneralizedTime (primitive)
+				times = append(times, content)
+			case tag&0x20 != 0: // constructed — descend
+				walk(content)
+			}
+			i += l
+		}
+	}
+	walk(der)
+	return times
 }
