@@ -21,6 +21,11 @@ import (
 // When ClientID is non-empty, HTTP Basic authentication is added to the request
 // using ClientID and ClientSecret. If HTTPClient is nil, http.DefaultClient is
 // used.
+//
+// Lifetime note: RFC 7662 responses commonly omit the "exp" field; when absent,
+// the returned Identity.Expiry is the zero time, so operators SHOULD set
+// Service.MaxLifetime to bound the issued Kerberos ticket — otherwise ticket
+// minting fails closed on a zero EndTime.
 type IntrospectionValidator struct {
 	// Endpoint is the URL of the token introspection endpoint (RFC 7662 §2).
 	Endpoint string
