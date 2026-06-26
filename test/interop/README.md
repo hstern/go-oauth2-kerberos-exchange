@@ -9,8 +9,8 @@ is lenient where MIT's is strict.
 
 1. `mint/` (Go) generates a service keytab, mints a service ticket carrying a
    signed synthetic PAC with this library's `DirectMinter`, and writes the
-   GSSAPI AP-REQ initial-context token plus a PAC-verify bundle (the PAC bytes
-   and the two signing keys).
+   GSSAPI AP-REQ initial-context token plus a bundle (the PAC bytes, the two
+   signing keys, and the PAC's user and group SIDs).
 2. **Ticket layer** — `accept.py` loads the **same keytab** into MIT krb5 (via
    `python-gssapi`, which binds to `libgssapi_krb5`) and runs
    `gss_accept_sec_context` on the token. It exits 0 only if MIT accepts the
@@ -19,12 +19,18 @@ is lenient where MIT's is strict.
    `krb5_pac_verify`, checking the PAC's NDR encoding, its Server signature
    (service key) and KDC signature (krbtgt key), and the PAC_CLIENT_INFO name
    and authtime.
+4. **SID-mapping layer** — `idmapcheck.c` runs the reference SSSD library
+   (`libsss_idmap`) with SSSD's default `ldap_id_mapping` configuration and
+   maps every SID in the PAC (the user SID and each group SID) to a POSIX ID,
+   confirming the synthetic SIDs are consumable by a real SSSD id-mapping
+   domain.
 
 The minter holds the service key (keytab); the acceptor validates the ticket
 **offline** with its copy of that key — no KDC and no network are involved,
 mirroring how a real Kerberos service (Dovecot/Cyrus, an SPNEGO backend)
-verifies a presented ticket. Together the two layers prove both the ticket
-wire format and the PAC are correct against the canonical C implementation.
+verifies a presented ticket. Together the three layers prove the ticket wire
+format, the PAC, and the PAC's SIDs are all correct against the canonical C
+implementations (MIT krb5 + SSSD).
 
 ## Run it
 
@@ -38,17 +44,23 @@ This also runs in CI (the `interop` job).
 
 ## Why it exists
 
-This harness caught a real bug: the minter emitted `KerberosTime` values in the
-process's local timezone (`...-0300`) instead of UTC (`...Z`). gokrb5 accepted
-the offset form, so every pure-Go test passed — but MIT krb5 (and AD/SSSD,
-Heimdal) reject it with an ASN.1 length error. The fix normalizes all
-`KerberosTime` values to UTC in the minter; `TestDirectMinterEmitsUTCKerberosTimes`
-guards it in the unit suite.
+This harness has caught real bugs that pure-Go tests cannot:
+
+- **Local-timezone `KerberosTime`** (ticket layer): the minter emitted ticket
+  times in the process's local zone (`...-0300`) instead of UTC (`...Z`).
+  gokrb5 accepted the offset form, so every pure-Go test passed — MIT krb5
+  rejects it with an ASN.1 length error. Fixed + guarded by
+  `TestDirectMinterEmitsUTCKerberosTimes`.
+- **SSSD-hostile RID synthesis** (SID-mapping layer): synthetic RIDs were
+  spread across the full 31-bit space, scattering principals across thousands
+  of SSSD id-map "slices" (slow, and exhausting SSSD's ~10000-slice pool past
+  ~30k identities). RIDs are now confined to a dense range so principals share
+  a small number of slices; guarded by `TestRIDsStayDenseForIDMapping`.
 
 ## Scope and the remaining bar
 
-This validates ticket/AP-REQ **acceptance** and PAC **signature/structure
-verification** by a strict C Kerberos stack. It does **not** yet validate that
-a PAC consumer maps the PAC's synthetic SIDs to POSIX identities — a real SSSD
-consumer is the next interop milestone (it needs realm/domain configuration and
-SID-mapping policy beyond this harness).
+This validates ticket/AP-REQ **acceptance**, PAC **signature/structure
+verification**, and **SID id-mapping** against the canonical C libraries (MIT
+krb5 + SSSD `libsss_idmap`). It does **not** stand up a full running SSSD
+daemon with a live domain (the responder path with NSS lookups); that end-to-end
+deployment validation is the remaining milestone.

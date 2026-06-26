@@ -13,10 +13,13 @@ package main
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/go-krb5/krb5/crypto"
@@ -26,6 +29,7 @@ import (
 	"github.com/go-krb5/krb5/iana/nametype"
 	"github.com/go-krb5/krb5/keytab"
 	"github.com/go-krb5/krb5/messages"
+	"github.com/go-krb5/krb5/pac"
 	"github.com/go-krb5/krb5/types"
 	"github.com/go-krb5/x/encoding/asn1"
 
@@ -80,7 +84,7 @@ func main() {
 		kerb.MintOptions{
 			ClientName:  types.PrincipalName{NameType: nametype.KRB_NT_PRINCIPAL, NameString: []string{*client}},
 			ClientRealm: *realm,
-			Identity:    kerb.Identity{Subject: *client, Expiry: now.Add(time.Hour)},
+			Identity:    kerb.Identity{Subject: *client, Claims: json.RawMessage(`{"groups":["mail-users","staff"]}`), Expiry: now.Add(time.Hour)},
 			AuthTime:    authTime,
 			EndTime:     now.Add(5 * time.Minute),
 		},
@@ -123,13 +127,30 @@ func writeBundle(path string, kt *keytab.Keytab, mt kerb.MintedTicket, service, 
 	if err != nil {
 		log.Fatalf("decrypt EncPart: %v", err)
 	}
-	bundle := fmt.Sprintf("PAC=%s\nSERVERKEY=%s\nKDCKEY=%s\nAUTHTIME=%d\nCLIENT=%s@%s\n",
-		hex.EncodeToString(extractPAC(plain)),
+	pacBytes := extractPAC(plain)
+	userSID, groupSIDs := pacSIDs(pacBytes, svc)
+	bundle := fmt.Sprintf("PAC=%s\nSERVERKEY=%s\nKDCKEY=%s\nAUTHTIME=%d\nCLIENT=%s@%s\nUSERSID=%s\nGROUPSIDS=%s\n",
+		hex.EncodeToString(pacBytes),
 		hex.EncodeToString(svc.KeyValue), hex.EncodeToString(tgt.KeyValue),
-		authTime.UTC().Unix(), client, realm)
+		authTime.UTC().Unix(), client, realm,
+		userSID, strings.Join(groupSIDs, ","))
 	if err := os.WriteFile(path, []byte(bundle), 0o600); err != nil {
 		log.Fatalf("write bundle: %v", err)
 	}
+}
+
+// pacSIDs parses the PAC's KERB_VALIDATION_INFO and returns the user's full SID
+// and the group SIDs, as the reference sss_idmap library would see them.
+func pacSIDs(pacBytes []byte, key types.EncryptionKey) (string, []string) {
+	var pt pac.PACType
+	if err := pt.Unmarshal(pacBytes); err != nil {
+		log.Fatalf("PAC unmarshal: %v", err)
+	}
+	if err := pt.ProcessPACInfoBuffers(key, log.New(io.Discard, "", 0)); err != nil {
+		log.Fatalf("PAC process: %v", err)
+	}
+	kvi := pt.KerbValidationInfo
+	return fmt.Sprintf("%s-%d", kvi.LogonDomainID.String(), kvi.UserID), kvi.GetGroupMembershipSIDs()
 }
 
 // extractPAC pulls the AD-WIN2K-PAC bytes out of a decrypted EncTicketPart's

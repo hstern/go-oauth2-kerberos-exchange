@@ -226,12 +226,25 @@ func parseDomainSID(s string) (mstypes.RPCSID, error) {
 	}, nil
 }
 
+// ridSynthSpace bounds the synthetic RID range. SSSD's algorithmic id-mapping
+// assigns a separate ~200000-wide "slice" per distinct RID band (RID/rangesize)
+// and has a finite slice pool (≈10000 by default). Real AD RIDs start at 1000
+// and are dense, so all principals share the first slice; a hash spread across
+// the full 31-bit space would instead scatter principals across thousands of
+// bands — slow to map and exhausting the slice pool past ~30k identities. We
+// therefore confine synthetic RIDs to ≈537M, capping them at ≈2684 bands
+// (well under the pool) while keeping the space large enough that name→RID hash
+// collisions stay rare for realistic realm sizes.
+const ridSynthSpace = 0x20000000
+
 // ridFromName derives a stable RID from an arbitrary name. Deterministic across
-// processes (SSSD caches SID->id); FNV-32a, OR'd clear of well-known RIDs.
+// processes (SSSD caches SID->id); FNV-32a folded into [1000, 1000+ridSynthSpace)
+// so the RID clears the well-known range (<1000) yet stays dense enough for
+// SSSD's slice-based id-mapping (see ridSynthSpace).
 func ridFromName(name string) uint32 {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(name))
-	return h.Sum32() | 0x40000000
+	return 1000 + h.Sum32()%ridSynthSpace
 }
 
 // ridFromSubject derives a deterministic, non-zero RID from a subject string.
