@@ -9,8 +9,9 @@ is lenient where MIT's is strict.
 
 1. `mint/` (Go) generates a service keytab, mints a service ticket carrying a
    signed synthetic PAC with this library's `DirectMinter`, and writes the
-   GSSAPI AP-REQ initial-context token plus a bundle (the PAC bytes, the two
-   signing keys, and the PAC's user and group SIDs).
+   GSSAPI AP-REQ initial-context token, the ccache (holder-of-key output), and a
+   bundle (the PAC bytes, the two signing keys, and the PAC's user and group
+   SIDs).
 2. **Ticket layer** — `accept.py` loads the **same keytab** into MIT krb5 (via
    `python-gssapi`, which binds to `libgssapi_krb5`) and runs
    `gss_accept_sec_context` on the token. It exits 0 only if MIT accepts the
@@ -24,13 +25,20 @@ is lenient where MIT's is strict.
    maps every SID in the PAC (the user SID and each group SID) to a POSIX ID,
    confirming the synthetic SIDs are consumable by a real SSSD id-mapping
    domain.
+5. **ccache layer** — `roundtrip.py` loads the minted **ccache** (the
+   holder-of-key output) as a client credential, initiates a
+   mutual-authentication GSSAPI context to the target SPN, has the MIT acceptor
+   accept it, and exercises the security layer with a confidential wrap/unwrap.
+   This validates the session key and the full handshake — how a real backend
+   (e.g. SASL GSSAPI) actually uses the credential — which the one-shot AP-REQ
+   token (layer 1) does not.
 
 The minter holds the service key (keytab); the acceptor validates the ticket
 **offline** with its copy of that key — no KDC and no network are involved,
 mirroring how a real Kerberos service (Dovecot/Cyrus, an SPNEGO backend)
-verifies a presented ticket. Together the three layers prove the ticket wire
-format, the PAC, and the PAC's SIDs are all correct against the canonical C
-implementations (MIT krb5 + SSSD).
+verifies a presented ticket. Together the layers prove the ticket wire format,
+the PAC, the PAC's SIDs, and the holder-of-key ccache are all correct against
+the canonical C implementations (MIT krb5 + SSSD).
 
 ## Run it
 

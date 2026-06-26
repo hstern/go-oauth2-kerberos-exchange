@@ -40,6 +40,7 @@ func main() {
 	var (
 		keytabPath = flag.String("keytab", "/tmp/interop.keytab", "path to write the shared service keytab")
 		tokenPath  = flag.String("token", "/tmp/interop.token.b64", "path to write the base64 GSSAPI AP-REQ token")
+		ccachePath = flag.String("ccache", "", "if set, write the service ticket as an MIT ccache here")
 		bundlePath = flag.String("bundle", "", "if set, write a PAC-verify bundle (PAC + signing keys) here")
 		realm      = flag.String("realm", "EXAMPLE.COM", "Kerberos realm")
 		service    = flag.String("service", "HTTP", "target service component")
@@ -100,6 +101,22 @@ func main() {
 	}
 	if err := os.WriteFile(*tokenPath, []byte(base64.StdEncoding.EncodeToString(token)), 0o600); err != nil {
 		log.Fatalf("write token: %v", err)
+	}
+
+	// 3b. Optionally emit the service ticket as an MIT ccache (the holder-of-key
+	//     output) so a client can drive a full GSSAPI exchange from it.
+	if *ccachePath != "" {
+		cred, err := mt.Credential(kerb.OutputCCache)
+		if err != nil {
+			log.Fatalf("ccache credential: %v", err)
+		}
+		cc, err := cred.CCache()
+		if err != nil {
+			log.Fatalf("marshal ccache: %v", err)
+		}
+		if err := os.WriteFile(*ccachePath, cc, 0o600); err != nil {
+			log.Fatalf("write ccache: %v", err)
+		}
 	}
 
 	// 4. Optionally emit a PAC-verify bundle: the PAC bytes plus the service key

@@ -1,8 +1,9 @@
 # Phase 6 interop harness: prove a Go-minted Kerberos credential is accepted by
-# the reference C implementations at three layers — the AP-REQ (MIT krb5 via
-# python-gssapi / libgssapi_krb5), the embedded PAC (MIT krb5_pac_verify), and
-# the PAC's SIDs (SSSD libsss_idmap). Builds the Go minter and the two C tools
-# at image-build time; run.sh exercises all three.
+# the reference C implementations at four layers — the AP-REQ (MIT krb5 via
+# python-gssapi / libgssapi_krb5), the embedded PAC (MIT krb5_pac_verify), the
+# PAC's SIDs (SSSD libsss_idmap), and the ccache through a full mutual-auth
+# GSSAPI exchange. Builds the Go minter and the two C tools at image-build time;
+# run.sh exercises all four.
 FROM golang:1.26-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
