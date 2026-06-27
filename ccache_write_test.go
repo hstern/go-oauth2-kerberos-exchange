@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-krb5/krb5/credentials"
-	"github.com/go-krb5/krb5/iana/nametype"
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/credentials"
+	"github.com/hstern/krb5/iana/nametype"
+	"github.com/hstern/krb5/types"
 )
 
 func TestMarshalCCacheRoundTrip(t *testing.T) {
@@ -32,7 +32,7 @@ func TestMarshalCCacheRoundTrip(t *testing.T) {
 	}
 	var cc credentials.CCache
 	if err := cc.Unmarshal(raw); err != nil {
-		t.Fatalf("ccache not loadable by go-krb5/krb5: %v", err)
+		t.Fatalf("ccache not loadable by hstern/krb5: %v", err)
 	}
 	if cc.DefaultPrincipal.PrincipalName.NameString[0] != "alice" {
 		t.Errorf("default principal = %v, want alice", cc.DefaultPrincipal.PrincipalName.NameString)

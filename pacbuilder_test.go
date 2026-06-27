@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-krb5/krb5/iana/etypeID"
-	"github.com/go-krb5/krb5/pac"
-	"github.com/go-krb5/x/rpc/mstypes"
+	"github.com/hstern/krb5/iana/etypeID"
+	"github.com/hstern/krb5/pac"
+	"github.com/hstern/x/rpc/mstypes"
 )
 
 func TestSyntheticPACBuilderVerifies(t *testing.T) {

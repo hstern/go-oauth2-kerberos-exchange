@@ -6,13 +6,13 @@ package kerbexchange
 import (
 	"time"
 
-	"github.com/go-krb5/krb5/credentials"
-	"github.com/go-krb5/krb5/iana/nametype"
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/credentials"
+	"github.com/hstern/krb5/iana/nametype"
+	"github.com/hstern/krb5/types"
 )
 
 // MarshalCCache builds a single-credential MIT credential cache from the
-// minted ticket and serializes it via go-krb5/krb5's CCache.Marshal.
+// minted ticket and serializes it via hstern/krb5's CCache.Marshal.
 func MarshalCCache(mt MintedTicket) ([]byte, error) {
 	tkt, err := mt.Ticket.Marshal()
 	if err != nil {

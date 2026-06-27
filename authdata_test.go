@@ -7,9 +7,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/types"
 
-	"github.com/go-krb5/x/encoding/asn1"
+	"github.com/hstern/x/encoding/asn1"
 )
 
 func TestPACAuthorizationDataRoundTrip(t *testing.T) {

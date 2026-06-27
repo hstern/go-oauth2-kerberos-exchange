@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-krb5/krb5/iana/nametype"
-	"github.com/go-krb5/krb5/keytab"
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/iana/nametype"
+	"github.com/hstern/krb5/keytab"
+	"github.com/hstern/krb5/types"
 )
 
 // ErrNoServiceKey is returned when the KeySource holds no key for an SPN/etype.

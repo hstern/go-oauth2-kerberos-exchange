@@ -9,15 +9,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-krb5/krb5/crypto"
-	"github.com/go-krb5/krb5/iana/adtype"
-	"github.com/go-krb5/krb5/iana/etypeID"
-	"github.com/go-krb5/krb5/iana/keyusage"
-	"github.com/go-krb5/krb5/iana/nametype"
-	"github.com/go-krb5/krb5/messages"
-	"github.com/go-krb5/krb5/pac"
-	"github.com/go-krb5/krb5/types"
-	"github.com/go-krb5/x/encoding/asn1"
+	"github.com/hstern/krb5/crypto"
+	"github.com/hstern/krb5/iana/adtype"
+	"github.com/hstern/krb5/iana/etypeID"
+	"github.com/hstern/krb5/iana/keyusage"
+	"github.com/hstern/krb5/iana/nametype"
+	"github.com/hstern/krb5/messages"
+	"github.com/hstern/krb5/pac"
+	"github.com/hstern/krb5/types"
+	"github.com/hstern/x/encoding/asn1"
 )
 
 func TestDirectMinterMintRejectsBadEndTime(t *testing.T) {

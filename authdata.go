@@ -4,10 +4,10 @@
 package kerbexchange
 
 import (
-	"github.com/go-krb5/krb5/iana/adtype"
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/iana/adtype"
+	"github.com/hstern/krb5/types"
 
-	"github.com/go-krb5/x/encoding/asn1"
+	"github.com/hstern/x/encoding/asn1"
 )
 
 // pacAuthorizationData wraps a marshalled PAC as AD-IF-RELEVANT{ AD-WIN2K-PAC },
