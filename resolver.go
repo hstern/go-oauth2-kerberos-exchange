@@ -6,8 +6,8 @@ package kerbexchange
 import (
 	"context"
 
-	"github.com/go-krb5/krb5/iana/nametype"
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/iana/nametype"
+	"github.com/hstern/krb5/types"
 )
 
 // Resolver maps a validated Identity and a requested SPN to the concrete

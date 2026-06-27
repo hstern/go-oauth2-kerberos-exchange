@@ -11,8 +11,8 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/go-krb5/krb5/pac"
-	"github.com/go-krb5/x/rpc/mstypes"
+	"github.com/hstern/krb5/pac"
+	"github.com/hstern/x/rpc/mstypes"
 )
 
 // neverFileTime is the MS "never" sentinel: 0x7FFFFFFFFFFFFFFF (max int64),

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-krb5/krb5/credentials"
+	"github.com/hstern/krb5/credentials"
 )
 
 func TestServiceExchangeCCache(t *testing.T) {

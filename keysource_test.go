@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-krb5/krb5/iana/etypeID"
-	"github.com/go-krb5/krb5/keytab"
+	"github.com/hstern/krb5/iana/etypeID"
+	"github.com/hstern/krb5/keytab"
 )
 
 func testKeytab(t *testing.T) *keytab.Keytab {

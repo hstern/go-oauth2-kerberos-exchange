@@ -6,8 +6,8 @@ package kerbexchange
 import (
 	"fmt"
 
-	"github.com/go-krb5/krb5/messages"
-	"github.com/go-krb5/krb5/types"
+	"github.com/hstern/krb5/messages"
+	"github.com/hstern/krb5/types"
 )
 
 // krb5MechOID is the DER-encoded OID for the Kerberos 5 GSS-API mechanism
