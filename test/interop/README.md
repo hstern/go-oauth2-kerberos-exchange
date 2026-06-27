@@ -68,7 +68,15 @@ This harness has caught real bugs that pure-Go tests cannot:
 ## Scope and the remaining bar
 
 This validates ticket/AP-REQ **acceptance**, PAC **signature/structure
-verification**, and **SID id-mapping** against the canonical C libraries (MIT
-krb5 + SSSD `libsss_idmap`). It does **not** stand up a full running SSSD
-daemon with a live domain (the responder path with NSS lookups); that end-to-end
-deployment validation is the remaining milestone.
+verification**, **SID id-mapping**, and the **ccache GSSAPI round-trip** against
+the canonical C libraries (MIT krb5 + SSSD `libsss_idmap`). These are the
+library's correctness contract, and they pass.
+
+A live SSSD **daemon** resolving a minted identity end to end is a
+*deployment-integration* concern, not a library-correctness one — and it has a
+real architectural boundary, demonstrated in `../sssd-daemon/`: a running daemon
+accepts our synthetic domain SID and initializes its algorithmic id-map range
+offline, but live SID→POSIX resolution first resolves a SID to a directory
+*object*, which is populated only from AD/LDAP or by the PAC responder ingesting
+a verified PAC — both coupled to AD/IPA domain enrollment that a standalone
+KDC-replacement realm does not have. See `../sssd-daemon/README.md`.
