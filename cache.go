@@ -49,8 +49,12 @@ func (m *MemoryCache) Put(key string, cred *Credential) {
 	m.store[key] = cred
 }
 
-// CacheKey builds a cache lookup key from a subject and a ServicePrincipal.
-// The NUL separator ensures that no two distinct (subject, spn) pairs collide.
-func CacheKey(subject string, spn ServicePrincipal) string {
-	return subject + "\x00" + spn.String()
+// CacheKey builds a cache lookup key from a subject, a ServicePrincipal, and the
+// requested output type. The output type is part of the key because a cached
+// Credential carries only the representation it was minted for (ccache or AP-REQ);
+// omitting it would let a ccache request return an AP-REQ-only entry, or vice
+// versa. The NUL separators ensure that no two distinct (subject, spn, output)
+// triples collide.
+func CacheKey(subject string, spn ServicePrincipal, output OutputType) string {
+	return subject + "\x00" + spn.String() + "\x00" + output.String()
 }
