@@ -28,7 +28,7 @@ func (s *Service) Exchange(ctx context.Context, req ExchangeRequest) (*Credentia
 	if err != nil {
 		return nil, err
 	}
-	key := CacheKey(id.Subject, req.Target)
+	key := CacheKey(id.Subject, req.Target, req.Output)
 	if s.Cache != nil {
 		if c, ok := s.Cache.Get(key); ok {
 			return c, nil

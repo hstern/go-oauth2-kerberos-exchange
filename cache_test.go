@@ -11,13 +11,13 @@ import (
 func TestMemoryCache(t *testing.T) {
 	c := NewMemoryCache()
 	spn := ServicePrincipal{Service: "imap", Host: "h", Realm: "R"}
-	key := CacheKey("alice", spn)
+	key := CacheKey("alice", spn, OutputCCache)
 	live := NewCredential("alice", spn, time.Now().Add(time.Hour), []byte("cc"), nil)
 	c.Put(key, live)
 	if got, ok := c.Get(key); !ok || got.Subject() != "alice" {
 		t.Fatal("expected cache hit")
 	}
-	bkey := CacheKey("bob", spn)
+	bkey := CacheKey("bob", spn, OutputCCache)
 	expired := NewCredential("bob", spn, time.Now().Add(-time.Minute), []byte("cc"), nil)
 	c.Put(bkey, expired)
 	if _, ok := c.Get(bkey); ok {
@@ -29,9 +29,15 @@ func TestMemoryCache(t *testing.T) {
 }
 
 func TestCacheKeyDistinct(t *testing.T) {
-	a := CacheKey("alice", ServicePrincipal{Service: "imap", Host: "h", Realm: "R"})
-	b := CacheKey("alice", ServicePrincipal{Service: "smtp", Host: "h", Realm: "R"})
+	spn := ServicePrincipal{Service: "imap", Host: "h", Realm: "R"}
+	a := CacheKey("alice", spn, OutputCCache)
+	b := CacheKey("alice", ServicePrincipal{Service: "smtp", Host: "h", Realm: "R"}, OutputCCache)
 	if a == b {
 		t.Error("different SPNs must yield different cache keys")
+	}
+	// The output type is part of the key: a cached Credential carries only the
+	// representation it was minted for, so ccache and AP-REQ must not collide.
+	if c := CacheKey("alice", spn, OutputAPReq); a == c {
+		t.Error("different output types must yield different cache keys")
 	}
 }
