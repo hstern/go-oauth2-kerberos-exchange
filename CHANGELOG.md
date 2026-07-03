@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-07-02
 
 ### Fixed
 
@@ -54,5 +54,6 @@ backends as that user with no master account.
   go-krb5 once those additions land there; because the exposed API uses krb5
   types, that switch will be a breaking change.
 
-[Unreleased]: https://github.com/hstern/go-oauth2-kerberos-exchange/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/hstern/go-oauth2-kerberos-exchange/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/hstern/go-oauth2-kerberos-exchange/releases/tag/v0.2.0
 [0.1.0]: https://github.com/hstern/go-oauth2-kerberos-exchange/releases/tag/v0.1.0
